@@ -486,6 +486,7 @@ impl MappableCommand {
         record_macro, "Record macro",
         replay_macro, "Replay macro",
         command_palette, "Open command palette",
+        // test_command, "Test command",
     );
 }
 
@@ -2784,6 +2785,17 @@ pub fn command_palette(cx: &mut Context) {
                 }
             }));
 
+            let plugin_commands = unsafe {
+                let library =
+                    libloading::Library::new("./target/release/libhelix_test_plugin.dylib")
+                        .unwrap();
+                let func: libloading::Symbol<extern "C" fn() -> Vec<MappableCommand>> =
+                    library.get(b"register_commands").unwrap();
+                func()
+            };
+
+            commands.extend(plugin_commands.into_iter());
+
             let picker = Picker::new(commands, keymap, move |cx, command, _action| {
                 let mut ctx = Context {
                     register,
@@ -3890,13 +3902,13 @@ fn yank_main_selection_to_primary_clipboard(cx: &mut Context) {
 }
 
 #[derive(Copy, Clone)]
-enum Paste {
+pub enum Paste {
     Before,
     After,
     Cursor,
 }
 
-fn paste_impl(
+pub fn paste_impl(
     values: &[String],
     doc: &mut Document,
     view: &mut View,

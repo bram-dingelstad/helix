@@ -1,0 +1,34 @@
+[package]
+name = "helix-test-plugin"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+# [profile.release]
+# opt-level = "z"
+# strip = true
+# lto = true
+# codegen-units = 1
+
+
+[lib]
+crate_type = ["dylib"]
+
+[dependencies]
+anyhow = "1.0.72"
+bitflags = "2.3.3"
+cocoa = "0.25.0"
+dark-light = "1.0.0"
+futures = "0.3.28"
+helix-term = { version = "0.6", path = "../helix-term" }
+# helix-core = { version = "0.6", path = "../helix-core" }
+helix-view = { version = "0.6", path = "../helix-view" }
+lazy_static = "1.4.0"
+libc = "0.2.147"
+objc = "0.2.7"
+# tokio = { version = "1.29.1", features = ["rt"] }
+# helix-lsp = { version = "0.6", path = "../helix-lsp" }
+# helix-dap = { version = "0.6", path = "../helix-dap" }
+# helix-vcs = { version = "0.6", path = "../helix-vcs" }
+# helix-loader = { version = "0.6", path = "../helix-loader" }

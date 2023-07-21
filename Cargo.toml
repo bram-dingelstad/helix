@@ -10,10 +10,11 @@ members = [
   "helix-vcs",
   "helix-parsec",
   "xtask",
+  "helix-test-plugin"
 ]
 
 default-members = [
-  "helix-term"
+  "helix-term",
 ]
 
 [profile.release]

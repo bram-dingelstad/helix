@@ -231,7 +231,7 @@ impl Application {
         ])
         .context("build signal handler")?;
 
-        let app = Self {
+        let mut app = Self {
             compositor,
             terminal,
             editor,
@@ -246,6 +246,26 @@ impl Application {
             lsp_progress: LspProgressMap::new(),
         };
 
+        let mut ctx = crate::commands::Context {
+            register: None,
+            count: None,
+            editor: &mut app.editor,
+            callback: None,
+            on_next_key_callback: None,
+            jobs: &mut app.jobs,
+        };
+
+        unsafe {
+            let library =
+                libloading::Library::new("./target/release/libhelix_test_plugin.dylib").unwrap();
+
+            let func: libloading::Symbol<extern "C" fn(&mut crate::commands::Context)> =
+                library.get(b"init").unwrap();
+            func(&mut ctx)
+        };
+
+        // loop {}
+
         Ok(app)
     }
 
@@ -254,6 +274,14 @@ impl Application {
             editor: &mut self.editor,
             jobs: &mut self.jobs,
             scroll: None,
+        };
+
+        unsafe {
+            let library =
+                libloading::Library::new("./target/release/libhelix_test_plugin.dylib").unwrap();
+            let func: libloading::Symbol<extern "C" fn(&mut crate::compositor::Context)> =
+                library.get(b"render").unwrap();
+            func(&mut cx)
         };
 
         // Acquire mutable access to the redraw_handle lock

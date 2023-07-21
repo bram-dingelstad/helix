@@ -14,6 +14,7 @@ use std::path::Path;
 
 use ignore::DirEntry;
 pub use keymap::macros::*;
+pub use tokio;
 
 #[cfg(not(windows))]
 fn true_color() -> bool {
