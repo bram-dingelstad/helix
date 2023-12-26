@@ -1,4 +1,5 @@
 mod client;
+pub mod file_event;
 pub mod jsonrpc;
 pub mod snippet;
 mod transport;
@@ -434,7 +435,7 @@ pub mod util {
             }
 
             let tabstops = tabstops.first().filter(|tabstops| !tabstops.is_empty());
-            let Some(tabstops) = tabstops else{
+            let Some(tabstops) = tabstops else {
                 // no tabstop normal mapping
                 mapped_selection.push(range);
                 continue;
@@ -444,36 +445,36 @@ pub mod util {
             // the tabstop closest to the range simply replaces `head` while anchor remains in place
             // the remaining tabstops receive their own single-width cursor
             if range.head < range.anchor {
-                let first_tabstop = tabstop_anchor + tabstops[0].1;
+                let last_idx = tabstops.len() - 1;
+                let last_tabstop = tabstop_anchor + tabstops[last_idx].0;
 
                 // if selection is forward but was moved to the right it is
                 // contained entirely in the replacement text, just do a point
                 // selection (fallback below)
-                if range.anchor >= first_tabstop {
-                    let range = Range::new(range.anchor, first_tabstop);
+                if range.anchor > last_tabstop {
+                    let range = Range::new(range.anchor, last_tabstop);
                     mapped_selection.push(range);
-                    let rem_tabstops = tabstops[1..]
+                    let rem_tabstops = tabstops[..last_idx]
                         .iter()
-                        .map(|tabstop| Range::point(tabstop_anchor + tabstop.1));
+                        .map(|tabstop| Range::point(tabstop_anchor + tabstop.0));
                     mapped_selection.extend(rem_tabstops);
                     continue;
                 }
             } else {
-                let last_idx = tabstops.len() - 1;
-                let last_tabstop = tabstop_anchor + tabstops[last_idx].1;
+                let first_tabstop = tabstop_anchor + tabstops[0].0;
 
                 // if selection is forward but was moved to the right it is
                 // contained entirely in the replacement text, just do a point
                 // selection (fallback below)
-                if range.anchor <= last_tabstop {
+                if range.anchor < first_tabstop {
                     // we can't properly compute the the next grapheme
                     // here because the transaction hasn't been applied yet
                     // that is not a problem because the range gets grapheme aligned anyway
                     // tough so just adding one will always cause head to be grapheme
                     // aligned correctly when applied to the document
-                    let range = Range::new(range.anchor, last_tabstop + 1);
+                    let range = Range::new(range.anchor, first_tabstop + 1);
                     mapped_selection.push(range);
-                    let rem_tabstops = tabstops[..last_idx]
+                    let rem_tabstops = tabstops[1..]
                         .iter()
                         .map(|tabstop| Range::point(tabstop_anchor + tabstop.0));
                     mapped_selection.extend(rem_tabstops);
@@ -547,6 +548,7 @@ pub enum MethodCall {
     WorkspaceFolders,
     WorkspaceConfiguration(lsp::ConfigurationParams),
     RegisterCapability(lsp::RegistrationParams),
+    UnregisterCapability(lsp::UnregistrationParams),
 }
 
 impl MethodCall {
@@ -569,6 +571,10 @@ impl MethodCall {
             lsp::request::RegisterCapability::METHOD => {
                 let params: lsp::RegistrationParams = params.parse()?;
                 Self::RegisterCapability(params)
+            }
+            lsp::request::UnregisterCapability::METHOD => {
+                let params: lsp::UnregistrationParams = params.parse()?;
+                Self::UnregisterCapability(params)
             }
             _ => {
                 return Err(Error::Unhandled);
@@ -629,6 +635,7 @@ pub struct Registry {
     syn_loader: Arc<helix_core::syntax::Loader>,
     counter: usize,
     pub incoming: SelectAll<UnboundedReceiverStream<(usize, Call)>>,
+    pub file_event_handler: file_event::Handler,
 }
 
 impl Registry {
@@ -638,6 +645,7 @@ impl Registry {
             syn_loader,
             counter: 0,
             incoming: SelectAll::new(),
+            file_event_handler: file_event::Handler::new(),
         }
     }
 
@@ -650,6 +658,7 @@ impl Registry {
     }
 
     pub fn remove_by_id(&mut self, id: usize) {
+        self.file_event_handler.remove_client(id);
         self.inner.retain(|_, language_servers| {
             language_servers.retain(|ls| id != ls.id());
             !language_servers.is_empty()
@@ -715,6 +724,7 @@ impl Registry {
                         .unwrap();
 
                     for old_client in old_clients {
+                        self.file_event_handler.remove_client(old_client.id());
                         tokio::spawn(async move {
                             let _ = old_client.force_shutdown().await;
                         });
@@ -731,6 +741,7 @@ impl Registry {
     pub fn stop(&mut self, name: &str) {
         if let Some(clients) = self.inner.remove(name) {
             for client in clients {
+                self.file_event_handler.remove_client(client.id());
                 tokio::spawn(async move {
                     let _ = client.force_shutdown().await;
                 });
@@ -738,36 +749,40 @@ impl Registry {
         }
     }
 
-    pub fn get(
-        &mut self,
-        language_config: &LanguageConfiguration,
-        doc_path: Option<&std::path::PathBuf>,
-        root_dirs: &[PathBuf],
+    pub fn get<'a>(
+        &'a mut self,
+        language_config: &'a LanguageConfiguration,
+        doc_path: Option<&'a std::path::PathBuf>,
+        root_dirs: &'a [PathBuf],
         enable_snippets: bool,
-    ) -> Result<HashMap<LanguageServerName, Arc<Client>>> {
-        language_config
-            .language_servers
-            .iter()
-            .map(|LanguageServerFeatures { name, .. }| {
+    ) -> impl Iterator<Item = (LanguageServerName, Result<Arc<Client>>)> + 'a {
+        language_config.language_servers.iter().map(
+            move |LanguageServerFeatures { name, .. }| {
                 if let Some(clients) = self.inner.get(name) {
                     if let Some((_, client)) = clients.iter().enumerate().find(|(i, client)| {
                         client.try_add_doc(&language_config.roots, root_dirs, doc_path, *i == 0)
                     }) {
-                        return Ok((name.to_owned(), client.clone()));
+                        return (name.to_owned(), Ok(client.clone()));
                     }
                 }
-                let client = self.start_client(
+                match self.start_client(
                     name.clone(),
                     language_config,
                     doc_path,
                     root_dirs,
                     enable_snippets,
-                )?;
-                let clients = self.inner.entry(name.clone()).or_default();
-                clients.push(client.clone());
-                Ok((name.clone(), client))
-            })
-            .collect()
+                ) {
+                    Ok(client) => {
+                        self.inner
+                            .entry(name.to_owned())
+                            .or_default()
+                            .push(client.clone());
+                        (name.clone(), Ok(client))
+                    }
+                    Err(err) => (name.to_owned(), Err(err)),
+                }
+            },
+        )
     }
 
     pub fn iter_clients(&self) -> impl Iterator<Item = &Arc<Client>> {

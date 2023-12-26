@@ -7,8 +7,9 @@ use crate::{
 use helix_core::{find_workspace, path, syntax::LanguageServerFeature, ChangeSet, Rope};
 use helix_loader::{self, VERSION_AND_GIT_HASH};
 use lsp::{
-    notification::DidChangeWorkspaceFolders, DidChangeWorkspaceFoldersParams, OneOf,
-    PositionEncodingKind, WorkspaceFolder, WorkspaceFoldersChangeEvent,
+    notification::DidChangeWorkspaceFolders, CodeActionCapabilityResolveSupport,
+    DidChangeWorkspaceFoldersParams, OneOf, PositionEncodingKind, WorkspaceFolder,
+    WorkspaceFoldersChangeEvent,
 };
 use lsp_types as lsp;
 use parking_lot::Mutex;
@@ -403,9 +404,19 @@ impl Client {
     where
         R::Params: serde::Serialize,
     {
+        self.call_with_timeout::<R>(params, self.req_timeout)
+    }
+
+    fn call_with_timeout<R: lsp::request::Request>(
+        &self,
+        params: R::Params,
+        timeout_secs: u64,
+    ) -> impl Future<Output = Result<Value>>
+    where
+        R::Params: serde::Serialize,
+    {
         let server_tx = self.server_tx.clone();
         let id = self.next_request_id();
-        let timeout_secs = self.req_timeout;
 
         async move {
             use std::time::Duration;
@@ -543,6 +554,15 @@ impl Client {
                         normalizes_line_endings: Some(false),
                         change_annotation_support: None,
                     }),
+                    did_change_watched_files: Some(lsp::DidChangeWatchedFilesClientCapabilities {
+                        dynamic_registration: Some(true),
+                        relative_pattern_support: Some(false),
+                    }),
+                    file_operations: Some(lsp::WorkspaceFileOperationsClientCapabilities {
+                        will_rename: Some(true),
+                        did_rename: Some(true),
+                        ..Default::default()
+                    }),
                     ..Default::default()
                 }),
                 text_document: Some(lsp::TextDocumentClientCapabilities {
@@ -609,6 +629,12 @@ impl Client {
                                 .collect(),
                             },
                         }),
+                        is_preferred_support: Some(true),
+                        disabled_support: Some(true),
+                        data_support: Some(true),
+                        resolve_support: Some(CodeActionCapabilityResolveSupport {
+                            properties: vec!["edit".to_owned(), "command".to_owned()],
+                        }),
                         ..Default::default()
                     }),
                     publish_diagnostics: Some(lsp::PublishDiagnosticsClientCapabilities {
@@ -641,6 +667,7 @@ impl Client {
                 version: Some(String::from(VERSION_AND_GIT_HASH)),
             }),
             locale: None, // TODO
+            work_done_progress_params: lsp::WorkDoneProgressParams::default(),
         };
 
         self.request::<lsp::request::Initialize>(params).await
@@ -687,6 +714,65 @@ impl Client {
         self.notify::<DidChangeWorkspaceFolders>(DidChangeWorkspaceFoldersParams {
             event: WorkspaceFoldersChangeEvent { added, removed },
         })
+    }
+
+    pub fn prepare_file_rename(
+        &self,
+        old_uri: &lsp::Url,
+        new_uri: &lsp::Url,
+    ) -> Option<impl Future<Output = Result<lsp::WorkspaceEdit>>> {
+        let capabilities = self.capabilities.get().unwrap();
+
+        // Return early if the server does not support willRename feature
+        match &capabilities.workspace {
+            Some(workspace) => match &workspace.file_operations {
+                Some(op) => {
+                    op.will_rename.as_ref()?;
+                }
+                _ => return None,
+            },
+            _ => return None,
+        }
+
+        let files = vec![lsp::FileRename {
+            old_uri: old_uri.to_string(),
+            new_uri: new_uri.to_string(),
+        }];
+        let request = self.call_with_timeout::<lsp::request::WillRenameFiles>(
+            lsp::RenameFilesParams { files },
+            5,
+        );
+
+        Some(async move {
+            let json = request.await?;
+            let response: Option<lsp::WorkspaceEdit> = serde_json::from_value(json)?;
+            Ok(response.unwrap_or_default())
+        })
+    }
+
+    pub fn did_file_rename(
+        &self,
+        old_uri: &lsp::Url,
+        new_uri: &lsp::Url,
+    ) -> Option<impl Future<Output = std::result::Result<(), Error>>> {
+        let capabilities = self.capabilities.get().unwrap();
+
+        // Return early if the server does not support DidRename feature
+        match &capabilities.workspace {
+            Some(workspace) => match &workspace.file_operations {
+                Some(op) => {
+                    op.did_rename.as_ref()?;
+                }
+                _ => return None,
+            },
+            _ => return None,
+        }
+
+        let files = vec![lsp::FileRename {
+            old_uri: old_uri.to_string(),
+            new_uri: new_uri.to_string(),
+        }];
+        Some(self.notify::<lsp::notification::DidRenameFiles>(lsp::RenameFilesParams { files }))
     }
 
     // -------------------------------------------------------------------------------------------
@@ -884,20 +970,19 @@ impl Client {
     ) -> Option<impl Future<Output = Result<()>>> {
         let capabilities = self.capabilities.get().unwrap();
 
-        let include_text = match &capabilities.text_document_sync {
-            Some(lsp::TextDocumentSyncCapability::Options(lsp::TextDocumentSyncOptions {
-                save: Some(options),
+        let include_text = match &capabilities.text_document_sync.as_ref()? {
+            lsp::TextDocumentSyncCapability::Options(lsp::TextDocumentSyncOptions {
+                save: options,
                 ..
-            })) => match options {
+            }) => match options.as_ref()? {
                 lsp::TextDocumentSyncSaveOptions::Supported(true) => false,
                 lsp::TextDocumentSyncSaveOptions::SaveOptions(lsp_types::SaveOptions {
                     include_text,
                 }) => include_text.unwrap_or(false),
-                // Supported(false)
-                _ => return None,
+                lsp::TextDocumentSyncSaveOptions::Supported(false) => return None,
             },
-            // unsupported
-            _ => return None,
+            // see: https://github.com/microsoft/language-server-protocol/issues/288
+            lsp::TextDocumentSyncCapability::Kind(..) => false,
         };
 
         Some(self.notify::<lsp::notification::DidSaveTextDocument>(
@@ -952,6 +1037,24 @@ impl Client {
         }
 
         Some(self.call::<lsp::request::ResolveCompletionItem>(completion_item))
+    }
+
+    pub fn resolve_code_action(
+        &self,
+        code_action: lsp::CodeAction,
+    ) -> Option<impl Future<Output = Result<Value>>> {
+        let capabilities = self.capabilities.get().unwrap();
+
+        // Return early if the server does not support resolving code actions.
+        match capabilities.code_action_provider {
+            Some(lsp::CodeActionProviderCapability::Options(lsp::CodeActionOptions {
+                resolve_provider: Some(true),
+                ..
+            })) => (),
+            _ => return None,
+        }
+
+        Some(self.call::<lsp::request::CodeActionResolveRequest>(code_action))
     }
 
     pub fn text_document_signature_help(
@@ -1427,5 +1530,14 @@ impl Client {
         };
 
         Some(self.call::<lsp::request::ExecuteCommand>(params))
+    }
+
+    pub fn did_change_watched_files(
+        &self,
+        changes: Vec<lsp::FileEvent>,
+    ) -> impl Future<Output = std::result::Result<(), Error>> {
+        self.notify::<lsp::notification::DidChangeWatchedFiles>(lsp::DidChangeWatchedFilesParams {
+            changes,
+        })
     }
 }

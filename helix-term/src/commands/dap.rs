@@ -8,7 +8,7 @@ use dap::{StackFrame, Thread, ThreadStates};
 use helix_core::syntax::{DebugArgumentValue, DebugConfigCompletion, DebugTemplate};
 use helix_dap::{self as dap, Client};
 use helix_lsp::block_on;
-use helix_view::editor::Breakpoint;
+use helix_view::{editor::Breakpoint, graphics::Margin};
 
 use serde_json::{to_value, Value};
 use tokio_stream::wrappers::UnboundedReceiverStream;
@@ -339,8 +339,12 @@ fn debug_parameter_prompt(
     .to_owned();
 
     let completer = match field_type {
-        "filename" => ui::completers::filename,
-        "directory" => ui::completers::directory,
+        "filename" => |editor: &Editor, input: &str| {
+            ui::completers::filename_with_git_ignore(editor, input, false)
+        },
+        "directory" => |editor: &Editor, input: &str| {
+            ui::completers::directory_with_git_ignore(editor, input, false)
+        },
         _ => ui::completers::none,
     };
 
@@ -577,7 +581,12 @@ pub fn dap_variables(cx: &mut Context) {
     }
 
     let contents = Text::from(tui::text::Text::from(variables));
-    let popup = Popup::new("dap-variables", contents);
+    let margin = if cx.editor.popup_border() {
+        Margin::all(1)
+    } else {
+        Margin::none()
+    };
+    let popup = Popup::new("dap-variables", contents).margin(margin);
     cx.replace_or_push_layer("dap-variables", popup);
 }
 

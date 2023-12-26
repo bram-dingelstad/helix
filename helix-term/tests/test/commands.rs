@@ -2,6 +2,7 @@ use helix_term::application::Application;
 
 use super::*;
 
+mod movement;
 mod write;
 
 #[tokio::test(flavor = "multi_thread")]
@@ -474,6 +475,52 @@ fn foo() {#[\n|]#\
 fn bar() {#(\n|)#\
 \x20   #(\n|)#\
 }#(|)#",
+    ))
+    .await?;
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_join_selections() -> anyhow::Result<()> {
+    // normal join
+    test((
+        platform_line(indoc! {"\
+            #[a|]#bc
+            def
+        "}),
+        "J",
+        platform_line(indoc! {"\
+            #[a|]#bc def
+        "}),
+    ))
+    .await?;
+
+    // join with empty line
+    test((
+        platform_line(indoc! {"\
+            #[a|]#bc
+
+            def
+        "}),
+        "JJ",
+        platform_line(indoc! {"\
+            #[a|]#bc def
+        "}),
+    ))
+    .await?;
+
+    // join with additional space in non-empty line
+    test((
+        platform_line(indoc! {"\
+            #[a|]#bc
+
+                def
+        "}),
+        "JJ",
+        platform_line(indoc! {"\
+            #[a|]#bc def
+        "}),
     ))
     .await?;
 

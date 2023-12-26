@@ -51,7 +51,7 @@ Its settings will be merged with the configuration directory `config.toml` and t
 | `auto-completion` | Enable automatic pop up of auto-completion | `true` |
 | `auto-format` | Enable automatic formatting on save | `true` |
 | `auto-save` | Enable automatic saving on the focus moving away from Helix. Requires [focus event support](https://github.com/helix-editor/helix/wiki/Terminal-Support) from your terminal | `false` |
-| `idle-timeout` | Time in milliseconds since last keypress before idle timers trigger. Used for autocompletion, set to 0 for instant | `400` |
+| `idle-timeout` | Time in milliseconds since last keypress before idle timers trigger. Used for autocompletion, set to 0 for instant | `250` |
 | `preview-completion-insert` | Whether to apply completion item instantly when selected | `true` |
 | `completion-trigger-len` | The min-length of word under cursor to trigger autocompletion | `2` |
 | `completion-replace` | Set to `true` to make completions always replace the entire word and not just the part before the cursor | `false` |
@@ -64,6 +64,9 @@ Its settings will be merged with the configuration directory `config.toml` and t
 | `text-width` | Maximum line length. Used for the `:reflow` command and soft-wrapping if `soft-wrap.wrap-at-text-width` is set | `80` |
 | `workspace-lsp-roots` | Directories relative to the workspace root that are treated as LSP roots. Should only be set in `.helix/config.toml` | `[]` |
 | `default-line-ending` | The line ending to use for new documents. Can be `native`, `lf`, `crlf`, `ff`, `cr` or `nel`. `native` uses the platform's native line ending (`crlf` on Windows, otherwise `lf`). | `native` |
+| `insert-final-newline` | Whether to automatically insert a trailing line-ending on write if missing | `true` |
+| `popup-border` | Draw border around `popup`, `menu`, `all`, or `none` | `none` |
+| `indent-heuristic` | How the indentation for a newly inserted line is computed: `simple` just copies the indentation level from the previous line, `tree-sitter` computes the indentation based on the syntax tree and `hybrid` combines both approaches. If the chosen heuristic is not available, a different one will be used as a fallback (the fallback order being `hybrid` -> `tree-sitter` -> `simple`). | `hybrid`
 
 ### `[editor.statusline]` Section
 
@@ -89,9 +92,9 @@ The `[editor.statusline]` key takes the following sub-keys:
 
 | Key           | Description | Default |
 | ---           | ---         | ---     |
-| `left`        | A list of elements aligned to the left of the statusline | `["mode", "spinner", "file-name"]` |
+| `left`        | A list of elements aligned to the left of the statusline | `["mode", "spinner", "file-name", "read-only-indicator", "file-modification-indicator"]` |
 | `center`      | A list of elements aligned to the middle of the statusline | `[]` |
-| `right`       | A list of elements aligned to the right of the statusline | `["diagnostics", "selections", "position", "file-encoding"]` |
+| `right`       | A list of elements aligned to the right of the statusline | `["diagnostics", "selections", "register", "position", "file-encoding"]` |
 | `separator`   | The character used to separate elements in the statusline | `"│"` |
 | `mode.normal` | The text shown in the `mode` element for normal mode | `"NOR"` |
 | `mode.insert` | The text shown in the `mode` element for insert mode | `"INS"` |
@@ -108,6 +111,7 @@ The following statusline elements can be configured:
 | `file-modification-indicator` | The indicator to show whether the file is modified (a `[+]` appears when there are unsaved changes) |
 | `file-encoding` | The encoding of the opened file if it differs from UTF-8 |
 | `file-line-ending` | The file line endings (CRLF or LF) |
+| `read-only-indicator` | An indicator that shows `[readonly]` when a file cannot be written |
 | `total-line-numbers` | The total line numbers of the opened file |
 | `file-type` | The type of the opened file |
 | `diagnostics` | The number of warnings and/or errors |
@@ -164,15 +168,30 @@ All git related options are only enabled in a git repository.
 
 | Key | Description | Default |
 |--|--|---------|
-|`hidden` | Enables ignoring hidden files | true
-|`follow-symlinks` | Follow symlinks instead of ignoring them | true
-|`deduplicate-links` | Ignore symlinks that point at files already shown in the picker | true
-|`parents` | Enables reading ignore files from parent directories | true
-|`ignore` | Enables reading `.ignore` files | true
-|`git-ignore` | Enables reading `.gitignore` files | true
-|`git-global` | Enables reading global `.gitignore`, whose path is specified in git's config: `core.excludefile` option | true
-|`git-exclude` | Enables reading `.git/info/exclude` files | true
+|`hidden` | Enables ignoring hidden files | `true`
+|`follow-symlinks` | Follow symlinks instead of ignoring them | `true`
+|`deduplicate-links` | Ignore symlinks that point at files already shown in the picker | `true`
+|`parents` | Enables reading ignore files from parent directories | `true`
+|`ignore` | Enables reading `.ignore` files | `true`
+|`git-ignore` | Enables reading `.gitignore` files | `true`
+|`git-global` | Enables reading global `.gitignore`, whose path is specified in git's config: `core.excludesfile` option | `true`
+|`git-exclude` | Enables reading `.git/info/exclude` files | `true`
 |`max-depth` | Set with an integer value for maximum depth to recurse | Defaults to `None`.
+
+Ignore files can be placed locally as `.ignore` or put in your home directory as `~/.ignore`. They support the usual ignore and negative ignore (unignore) rules used in `.gitignore` files.
+
+Additionally, you can use Helix-specific ignore files by creating a local `.helix/ignore` file in the current workspace or a global `ignore` file located in your Helix config directory:
+- Linux and Mac: `~/.config/helix/ignore`
+- Windows: `%AppData%\helix\ignore`
+
+Example:
+
+```ini
+# unignore in file picker and global search
+!.github/
+!.gitignore
+!.gitattributes
+```
 
 ### `[editor.auto-pairs]` Section
 
@@ -347,3 +366,11 @@ max-wrap = 25 # increase value to reduce forced mid-word wrapping
 max-indent-retain = 0
 wrap-indicator = ""  # set wrap-indicator to "" to hide it
 ```
+
+### `[editor.smart-tab]` Section
+
+
+| Key        | Description | Default |
+|------------|-------------|---------|
+| `enable` | If set to true, then when the cursor is in a position with non-whitespace to its left, instead of inserting a tab, it will run `move_parent_node_end`. If there is only whitespace to the left, then it inserts a tab as normal. With the default bindings, to explicitly insert a tab character, press Shift-tab. | `true` |
+| `supersede-menu` | Normally, when a menu is on screen, such as when auto complete is triggered, the tab key is bound to cycling through the items. This means when menus are on screen, one cannot use the tab key to trigger the `smart-tab` command. If this option is set to true, the `smart-tab` command always takes precedence, which means one cannot use the tab key to cycle through menu items. One of the other bindings must be used instead, such as arrow keys or `C-n`/`C-p`. | `false` |
