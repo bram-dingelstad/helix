@@ -11,6 +11,6 @@ crate_type = ["dylib"]
 
 [dependencies]
 async-std = "1.12.0"
-helix-term = { version = "0.6", path = "../helix-term" }
-helix-view = { version = "0.6", path = "../helix-view" }
+helix-term = { path = "../helix-term" }
+helix-view = { path = "../helix-view" }
 lazy_static = "1.4.0"

@@ -12,7 +12,6 @@ members = [
   "helix-vcs",
   "helix-parsec",
   "xtask",
-  "helix-plugin",
   "helix-plugin-auto-darkmode"
 ]
 
