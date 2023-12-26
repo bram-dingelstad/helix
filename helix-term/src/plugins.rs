@@ -54,7 +54,7 @@ pub struct Plugins {
 }
 
 impl Plugins {
-    pub fn new(config: Arc<ArcSwapAny<Arc<crate::config::Config>>>) -> Self {
+    pub fn new(_config: Arc<ArcSwapAny<Arc<crate::config::Config>>>) -> Self {
         let mut plugin_config_path = helix_loader::config_dir();
         plugin_config_path.push("helix");
         plugin_config_path.set_file_name("plugins.toml");
@@ -63,8 +63,6 @@ impl Plugins {
             .unwrap_or_default()
             .parse::<toml::Table>()
             .unwrap_or_default();
-
-        // println!("CONFIG FILE ({plugin_config_path:#?}): {plugin_config:#?}");
 
         Self {
             plugins: plugin_config
@@ -157,12 +155,9 @@ impl Plugin {
             });
         }
 
-        println!("init hook: {init_hook:#?}?");
-
         if let Some(hook) = init_hook {
             hook(config);
         }
-        // panic!();
 
         plugin
     }
