@@ -84,6 +84,7 @@ pub struct Context<'a> {
     pub register: Option<char>,
     pub count: Option<NonZeroUsize>,
     pub editor: &'a mut Editor,
+    pub plugins: &'a mut crate::plugins::Plugins,
 
     pub callback: Option<crate::compositor::Callback>,
     pub on_next_key_callback: Option<OnKeyCallback>,
@@ -197,6 +198,8 @@ impl MappableCommand {
                 if let Some(command) = typed::TYPABLE_COMMAND_MAP.get(name.as_str()) {
                     let mut cx = compositor::Context {
                         editor: cx.editor,
+                        plugins: cx.plugins,
+
                         jobs: cx.jobs,
                         scroll: None,
                     };
@@ -2785,15 +2788,7 @@ pub fn command_palette(cx: &mut Context) {
                 }
             }));
 
-            let plugin_commands = unsafe {
-                let library =
-                    libloading::Library::new("./target/release/libhelix_test_plugin.dylib")
-                        .unwrap();
-                let func: libloading::Symbol<extern "C" fn() -> Vec<MappableCommand>> =
-                    library.get(b"register_commands").unwrap();
-                func()
-            };
-
+            let plugin_commands = cx.plugins.get_commands();
             commands.extend(plugin_commands.into_iter());
 
             let picker = Picker::new(commands, keymap, move |cx, command, _action| {
@@ -2801,6 +2796,7 @@ pub fn command_palette(cx: &mut Context) {
                     register,
                     count,
                     editor: cx.editor,
+                    plugins: cx.plugins,
                     callback: None,
                     on_next_key_callback: None,
                     jobs: cx.jobs,

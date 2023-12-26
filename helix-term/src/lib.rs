@@ -9,6 +9,7 @@ pub mod config;
 pub mod health;
 pub mod job;
 pub mod keymap;
+pub mod plugins;
 pub mod ui;
 use std::path::Path;
 

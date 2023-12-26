@@ -62,6 +62,7 @@ pub struct Application {
     compositor: Compositor,
     terminal: Terminal,
     pub editor: Editor,
+    pub plugins: crate::plugins::Plugins,
 
     config: Arc<ArcSwap<Config>>,
 
@@ -140,6 +141,7 @@ impl Application {
         let area = terminal.size().expect("couldn't get terminal size");
         let mut compositor = Compositor::new(area);
         let config = Arc::new(ArcSwap::from_pointee(config));
+
         let mut editor = Editor::new(
             area,
             theme_loader.clone(),
@@ -231,10 +233,13 @@ impl Application {
         ])
         .context("build signal handler")?;
 
-        let mut app = Self {
+        let plugins = crate::plugins::Plugins::new(Arc::clone(&config));
+
+        let app = Self {
             compositor,
             terminal,
             editor,
+            plugins,
 
             config,
 
@@ -246,42 +251,15 @@ impl Application {
             lsp_progress: LspProgressMap::new(),
         };
 
-        let mut ctx = crate::commands::Context {
-            register: None,
-            count: None,
-            editor: &mut app.editor,
-            callback: None,
-            on_next_key_callback: None,
-            jobs: &mut app.jobs,
-        };
-
-        unsafe {
-            let library =
-                libloading::Library::new("./target/release/libhelix_test_plugin.dylib").unwrap();
-
-            let func: libloading::Symbol<extern "C" fn(&mut crate::commands::Context)> =
-                library.get(b"init").unwrap();
-            func(&mut ctx)
-        };
-
-        // loop {}
-
         Ok(app)
     }
 
     async fn render(&mut self) {
         let mut cx = crate::compositor::Context {
             editor: &mut self.editor,
+            plugins: &mut self.plugins,
             jobs: &mut self.jobs,
             scroll: None,
-        };
-
-        unsafe {
-            let library =
-                libloading::Library::new("./target/release/libhelix_test_plugin.dylib").unwrap();
-            let func: libloading::Symbol<extern "C" fn(&mut crate::compositor::Context)> =
-                library.get(b"render").unwrap();
-            func(&mut cx)
         };
 
         // Acquire mutable access to the redraw_handle lock
@@ -347,6 +325,10 @@ impl Application {
                 }
                 Some(event) = input_stream.next() => {
                     self.handle_terminal_events(event).await;
+                }
+                Some(callback) = self.plugins.next_callback() => {
+                    self.plugins.handle_callback(&mut self.editor, callback);
+                    self.render().await;
                 }
                 Some(callback) = self.jobs.futures.next() => {
                     self.jobs.handle_callback(&mut self.editor, &mut self.compositor, callback);
@@ -539,6 +521,7 @@ impl Application {
     pub async fn handle_idle_timeout(&mut self) {
         let mut cx = crate::compositor::Context {
             editor: &mut self.editor,
+            plugins: &mut self.plugins,
             jobs: &mut self.jobs,
             scroll: None,
         };
@@ -654,6 +637,7 @@ impl Application {
     ) {
         let mut cx = crate::compositor::Context {
             editor: &mut self.editor,
+            plugins: &mut self.plugins,
             jobs: &mut self.jobs,
             scroll: None,
         };

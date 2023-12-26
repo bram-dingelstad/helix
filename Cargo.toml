@@ -10,7 +10,8 @@ members = [
   "helix-vcs",
   "helix-parsec",
   "xtask",
-  "helix-test-plugin"
+  "helix-plugin",
+  "helix-plugin-auto-darkmode"
 ]
 
 default-members = [

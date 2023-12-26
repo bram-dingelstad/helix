@@ -22,6 +22,7 @@ pub use helix_view::input::Event;
 
 pub struct Context<'a> {
     pub editor: &'a mut Editor,
+    pub plugins: &'a mut crate::plugins::Plugins,
     pub scroll: Option<usize>,
     pub jobs: &'a mut Jobs,
 }

@@ -1,0 +1,16 @@
+[package]
+name = "helix-plugin-auto-darkmode"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+
+[lib]
+crate_type = ["dylib"]
+
+[dependencies]
+async-std = "1.12.0"
+helix-term = { version = "0.6", path = "../helix-term" }
+helix-view = { version = "0.6", path = "../helix-view" }
+lazy_static = "1.4.0"
