@@ -131,8 +131,10 @@ impl Application {
             .unwrap_or_else(|| theme_loader.default_theme(true_color));
 
         let syn_loader = std::sync::Arc::new(syntax::Loader::new(syn_loader_conf));
+        let plugins = crate::plugins::Plugins::new(&config);
 
         #[cfg(not(feature = "integration"))]
+        // TODO: Implement "plugin" backends
         let backend = CrosstermBackend::new(stdout(), &config.editor);
 
         #[cfg(feature = "integration")]
@@ -239,8 +241,6 @@ impl Application {
             signal::SIGINT,
         ])
         .context("build signal handler")?;
-
-        let plugins = crate::plugins::Plugins::new(Arc::clone(&config));
 
         let app = Self {
             compositor,

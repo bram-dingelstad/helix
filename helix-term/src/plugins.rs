@@ -1,4 +1,3 @@
-use arc_swap::ArcSwapAny;
 use std::sync::Arc;
 use std::sync::Mutex;
 
@@ -54,7 +53,7 @@ pub struct Plugins {
 }
 
 impl Plugins {
-    pub fn new(_config: Arc<ArcSwapAny<Arc<crate::config::Config>>>) -> Self {
+    pub fn new(_config: &crate::config::Config) -> Self {
         let mut plugin_config_path = helix_loader::config_dir();
         plugin_config_path.push("helix");
         plugin_config_path.set_file_name("plugins.toml");
